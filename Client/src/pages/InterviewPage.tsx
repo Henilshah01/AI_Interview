@@ -12,6 +12,8 @@ import { generateNextQuestion } from "@/utils/handleQuestionAnswer";
 import selectRoundAndTimeLimit from "@/utils/selectRoundAndTimeLimit";
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import Avatar3D from "@/components/general/Avatar3D"
+import Avatar3DVariant from "@/components/general/Avatar3DVariant"
 
 function InterviewPage() {
 
@@ -23,30 +25,14 @@ function InterviewPage() {
   const [resettingQuestion, setResettingQuestion] = useState(false);
 
   const navigate = useNavigate()
-  useAutoSpeechRecognizer(currentQuestionIndex)
-
-  // helper function for transcribing video into text
-  const handleVideoTranscription = async () => {
-    try {
-      // TODO: Convert video into text and return it
-      return "example text cause of typescript";
-    } catch (error) {
-      if (error instanceof Error) {
-        toast({ title: error.message })
-      } else {
-        toast({ title: "Something went wrong while processing video" })
-        console.log(error)
-      }
-      return null;
-    }
-  }
+  const { transcript } = useAutoSpeechRecognizer(currentQuestionIndex);
 
   // helper function for generating next question using gemini API
-  const getNextQuestion = useCallback(async (transcribedText: string) => {
+  const getQuestion = useCallback(async (transcribedText: string, currentQuestionIndex: number) => {
     if (!candidate) return;
-  
-    const roundAndTimeLimit = selectRoundAndTimeLimit(currentQuestionIndex + 1);
-  
+
+    const roundAndTimeLimit = selectRoundAndTimeLimit(currentQuestionIndex);
+
     const data = {
       yearsOfExperience: candidate.yearsOfExperience,
       candidateName: candidate.name,
@@ -56,106 +42,101 @@ function InterviewPage() {
       timeLimit: roundAndTimeLimit.timeLimit,
       previousAnswer: transcribedText,
     };
-  
+
     // Timeout after 10 seconds if API is slow
     const timeoutPromise = new Promise<string | null>((resolve) =>
       setTimeout(() => resolve(null), 10000)
     );
-  
-    console.log("📡 Calling AI API for Next Question...");
+
     const aiPromise = generateNextQuestion(data);
-  
+
     const text = await Promise.race([aiPromise, timeoutPromise]); // Whichever finishes first
-  
+
     if (!text) {
       console.warn("⏳ AI API Timed Out!");
       toast({ title: "AI took too long. Try again." });
       return null;
     }
-  
-    console.log("✅ AI Response Received:", text);
+
     return text;
-  }, [candidate, currentQuestionIndex]);  
+  }, [candidate]);
+
+  const handleInterviewEnd = async () => {
+    socket.emit("interview-complete", {})
+
+    // TODO: api calls
+
+    navigate(`/interview/${socket.id}/feedback`)
+
+  }
 
   // main function to reset the question
   const handleResetQuestion = async () => {
-    console.log("⏳ Resetting question...");
-  
     if (!questionAnswerSets) return;
-  
+
     // Block multiple resets
     if (resettingQuestion) return;
     setResettingQuestion(true);
-  
+
     try {
-      console.time("📌 Transcription Time");
-      const transcribedText = await handleVideoTranscription();
-      console.timeEnd("📌 Transcription Time");
-  
-      if (!transcribedText) {
-        toast({ title: "Something went wrong while processing video" });
-        return;
-      }
-  
-      console.log("🎤 Transcribed Text:", transcribedText);
-  
+
       socket.emit("update-question-data", {
         questionAnswerIndex: currentQuestionIndex,
-        answer: transcribedText,
+        answer: transcript,
       });
-  
-      updateAnswer(transcribedText, currentQuestionIndex);
-  
-      console.time("📌 Question Generation Time");
-      const newGeneratedQuestion = await getNextQuestion(transcribedText);
-      console.timeEnd("📌 Question Generation Time");
-  
+
+      updateAnswer(transcript, currentQuestionIndex);
+
+      if (selectRoundAndTimeLimit(currentQuestionIndex + 1).round === "end") {
+        toast({ title: "You have reached the end of the interview" });
+        handleInterviewEnd()
+        return;
+      }
+
+      const newGeneratedQuestion = await getQuestion(transcript, currentQuestionIndex + 1);
+
       if (!newGeneratedQuestion) {
         toast({ title: "Something went wrong while generating question" });
         return;
       }
-  
-      console.log("❓ New Generated Question:", newGeneratedQuestion);
-  
+
       addQuestionAnswerSet({
         question: newGeneratedQuestion,
         answer: "",
         round: selectRoundAndTimeLimit(currentQuestionIndex + 1).round,
         timeLimit: selectRoundAndTimeLimit(currentQuestionIndex + 1).timeLimit,
       });
-  
+
       setCurrentQuestionIndex((prev) => prev + 1);
-  
-      console.log("📡 Emitting New Question to Backend");
+
       socket.emit("initialize-new-question", {
         question: newGeneratedQuestion,
         answer: "",
         timeLimit: selectRoundAndTimeLimit(currentQuestionIndex + 1).timeLimit,
         round: selectRoundAndTimeLimit(currentQuestionIndex + 1).round,
       });
-  
-      console.log("✅ Question Reset Complete");
+
     } finally {
       setResettingQuestion(false);
     }
-  };  
+  };
 
   // useEffect for initial setup
   useEffect(() => {
     const initialSetup = async () => {
       if (!questionAnswerSets && candidate) {
-        const text = await getNextQuestion("")
+        const text = await getQuestion("", currentQuestionIndex)
         if (!text) {
           return
         }
-        addQuestionAnswerSet({ question: text, answer: "", round: "aptitude", timeLimit: 60 });
+        addQuestionAnswerSet({ question: text, answer: "", round: "technical", timeLimit: 180 });
         socket.emit("initial-setup", candidate)
-        socket.emit("initialize-new-question", { question: text, round: "aptitude", timeLimit: 60 })
+        socket.emit("initialize-new-question", { question: text, round: "technical", timeLimit: 180 })
       }
     }
     initialSetup()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [addQuestionAnswerSet, candidate, getNextQuestion, socket])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [addQuestionAnswerSet, candidate, socket])
 
   // socket event handlers
   useEffect(() => {
@@ -198,8 +179,21 @@ function InterviewPage() {
       socket.off("disconnect", handleDisconnect);
       socket.off("connect_error", handleConnectError);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [candidate, navigate, setSocketId]);
+
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      return "Are you sure you want to leave? Your progress will be lost.";
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, []);
 
   return (
     <div className="">
@@ -233,20 +227,65 @@ function InterviewPage() {
         </div>
       </div>
 
-      <div className="p-4 rounded-md grid grid-cols-7 gap-4">
-        <CodeEditor />
-        <div className="col-span-2">
-          {/* webcam */}
-          <Webcam questionAnswerIndex={currentQuestionIndex} />
-          <div className="h-full w-full bg-red-500">
-            {/* avatar */}
-            <p className="p-4">{questionAnswerSets && questionAnswerSets[currentQuestionIndex]?.question || "No question found"}</p>
+
+      {selectRoundAndTimeLimit(currentQuestionIndex).round === "technical" ?
+        <div className="p-4 rounded-md grid grid-cols-9 gap-4">
+          <div className="col-span-7 h-[80vh]">
+            <div className="h-20 px-20 font-semibold bg-blue-200 text-zinc-900 rounded-lg mb-2 overflow-auto py-1 z-10 ">
+              <p className="">
+                {questionAnswerSets && questionAnswerSets[currentQuestionIndex]?.question || "No question found"}
+              </p>
+            </div>
+            <CodeEditor />
           </div>
-          {/* <div className="mt-4 px-4 text-xl">
-            Current detected state: <strong>{emotionalState}</strong>
-          </div> */}
+          <div className="col-span-2">
+            <Avatar3D text={questionAnswerSets && questionAnswerSets[currentQuestionIndex].question || "No question found"} />
+            <Webcam height={480} width={480} videoHeight={480} videoWidth={480} questionAnswerIndex={currentQuestionIndex} />
+            {/* transcript chatbox */}
+            {transcript && (
+              <div className="mt-2 text-sm italic text-gray-600 dark:text-gray-400">
+                {[...transcript
+                  .split(/\r?\n/)
+                  .filter(line => line.trim() !== "")
+                  .reverse()]
+                  .slice(0, 2)
+                  .reverse()
+                  .map((line, index) => (
+                    <p key={index}>{line}</p>
+                  ))}
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+        :
+        <div className="min-h-[80vh] space-x-2">
+          <div className="h-20 px-20 font-semibold overflow-auto py-1 z-10 ">
+            <p className="text-xl">
+              {questionAnswerSets && questionAnswerSets[currentQuestionIndex]?.question || "No question found"}
+            </p>
+          </div>
+          <div className="flex justify-center items-center">
+            <Avatar3DVariant
+              text={questionAnswerSets && questionAnswerSets[currentQuestionIndex].question || "No question found"}
+            />
+            <Webcam height={480} width={480} videoHeight={580} videoWidth={580} questionAnswerIndex={currentQuestionIndex} />
+            {/* transcript chatbox */}
+            {transcript && (
+              <div className="mt-2 text-sm rounded-xl bg-blue-400 italic text-gray-400 dark:text-gray-400">
+                {[...transcript
+                  .split(/\r?\n/)
+                  .filter(line => line.trim() !== "")
+                  .reverse()]
+                  .slice(0, 2)
+                  .reverse()
+                  .map((line, index) => (
+                    <p key={index}>{line}</p>
+                  ))}
+              </div>
+            )}
+          </div>
+        </div>
+      }
     </div >
   );
 }

@@ -11,9 +11,11 @@ import AuthLayout from './layouts/AuthLayout'
 import AppLayout from './layouts/AppLayout'
 import DashboardPage from './pages/DashboardPage'
 import RootLayout from './layouts/RootLayout'
-import FeedbackPage from './pages/FeedbackPage'
 import InterviewPage from './pages/InterviewPage'
 import InterviewLayout from './layouts/InterviewLayout'
+import InterviewForm from './components/interview/InterviewForm'
+import AboutPage from './pages/AboutPage'
+import AnalyticsPage from './components/general/AnayaticsPage'
 
 // Import your Publishable Key
 const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
@@ -33,6 +35,10 @@ const router = createBrowserRouter([
         path: "",
         element: <LandingPage />,
       },
+      {
+        path: "about",
+        element: <AboutPage />,
+      },
       // protected routes
       {
         path: "dashboard",
@@ -41,6 +47,10 @@ const router = createBrowserRouter([
           {
             path: "",
             element: <DashboardPage />,
+          },
+          {
+            path: "form",
+            element: <InterviewForm />,
           },
         ]
       },
@@ -54,7 +64,7 @@ const router = createBrowserRouter([
           },
           {
             path: ":id/feedback",
-            element: <FeedbackPage />,
+            element: <AnalyticsPage />,
           },
         ]
       },
@@ -75,7 +85,7 @@ const router = createBrowserRouter([
       },
       // 404 page
       {
-        path: "*",
+        path: "/",
         element: <NotFoundPage />,
       },
     ]

@@ -1,9 +1,7 @@
 import { useEffect, useRef } from 'react';
 import {
   nets,
-  resizeResults,
   matchDimensions,
-  draw,
   detectSingleFace,
 } from 'face-api.js';
 import useSocket from "@/socket/useSocket";
@@ -22,13 +20,13 @@ function isLightingGood(video: HTMLVideoElement, threshold = 80): boolean {
   canvas.height = video.videoHeight;
   const ctx = canvas.getContext('2d');
   if (!ctx) return false;
-  
+
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
   const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
   const data = imageData.data;
   let totalLuminance = 0;
   const pixelCount = data.length / 4;
-  
+
   for (let i = 0; i < data.length; i += 4) {
     const r = data[i];
     const g = data[i + 1];
@@ -36,9 +34,8 @@ function isLightingGood(video: HTMLVideoElement, threshold = 80): boolean {
     const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
     totalLuminance += luminance;
   }
-  
+
   const avgLuminance = totalLuminance / pixelCount;
-  console.log("avgLuminance:", avgLuminance);
   return avgLuminance > threshold;
 }
 
@@ -75,7 +72,7 @@ function evaluateEmotionalState(expressions: ExpressionScores): string {
   return topState;
 }
 
-function Webcam({ questionAnswerIndex }: { questionAnswerIndex: number }) {
+function Webcam({ questionAnswerIndex, videoWidth, videoHeight, height, width }: { questionAnswerIndex: number, videoWidth: number, videoHeight: number, height: number, width: number }) {
   const location = useLocation();
   const socket = useSocket();
   const MODEL_URL = '/models';
@@ -95,7 +92,7 @@ function Webcam({ questionAnswerIndex }: { questionAnswerIndex: number }) {
     if (!videoRef.current) return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 640, height: 480 }
+        video: { width: videoHeight, height: videoWidth }
       });
       videoRef.current.srcObject = stream;
     } catch (err) {
@@ -153,14 +150,9 @@ function Webcam({ questionAnswerIndex }: { questionAnswerIndex: number }) {
             console.warn("No face detected 😢");
           }
 
-          const resizedDetection = detection ? resizeResults(detection, displaySize) : null;
           const ctx = canvas.getContext("2d");
           if (ctx) {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            if (resizedDetection) {
-              draw.drawDetections(canvas, resizedDetection);
-              draw.drawFaceExpressions(canvas, resizedDetection);
-            }
           }
         }
         animationFrameId.current = requestAnimationFrame(processVideoFrame);
@@ -219,7 +211,7 @@ function Webcam({ questionAnswerIndex }: { questionAnswerIndex: number }) {
         console.warn("Error disposing models:", error);
       }
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname, questionAnswerIndex, socket]);
 
   return (
@@ -232,12 +224,13 @@ function Webcam({ questionAnswerIndex }: { questionAnswerIndex: number }) {
             playsInline
             muted
             aria-label="Live camera feed for emotion detection"
-            style={{ width: 640, height: 480 }}
+            style={{ width: width, height: height }}
           />
           <canvas
             ref={canvasRef}
             aria-label="Face detection overlay"
             style={{
+              display: "none",
               position: "absolute",
               top: 0,
               left: 0,

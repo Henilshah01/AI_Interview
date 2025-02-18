@@ -1,43 +1,50 @@
 import "regenerator-runtime/runtime";
-import { useEffect, useRef } from 'react';
-import SpeechRecognition, { useSpeechRecognition } from 'react-speech-recognition';
+import { useEffect, useRef, useState } from "react";
+import SpeechRecognition, { useSpeechRecognition } from "react-speech-recognition";
 
-// Module-level variable to store transcripts by question index.
 export const previousTranscriptions: Record<number, string> = {};
 
 export function useAutoSpeechRecognizer(questionAnswerIndex: number) {
   const { transcript, resetTranscript, browserSupportsSpeechRecognition } = useSpeechRecognition();
+  const [storedTranscript, setStoredTranscript] = useState<string>("");
   const prevQuestionAnswerIndex = useRef<number | null>(null);
+  const transcriptRef = useRef<string>("");
 
-  // Start listening once on mount.
   useEffect(() => {
-    if (!browserSupportsSpeechRecognition) return;
+    transcriptRef.current = transcript;
+  }, [transcript]);
 
-    // Start listening continuously.
+  useEffect(() => {
+    if (!browserSupportsSpeechRecognition) {
+      console.error("Browser does not support speech recognition.");
+      return;
+    }
+
     SpeechRecognition.startListening({ continuous: true, language: "en-IN" });
 
-    // Cleanup: stop listening on unmount.
     return () => {
       SpeechRecognition.stopListening();
     };
   }, [browserSupportsSpeechRecognition]);
 
-  // When the question changes, store the previous transcript and reset.
   useEffect(() => {
     if (!browserSupportsSpeechRecognition) return;
 
-    // If there's a previous question, store its transcript.
-    if (prevQuestionAnswerIndex.current !== null) {
-      previousTranscriptions[prevQuestionAnswerIndex.current] = transcript;
-      console.log(
-        `Stored transcript for question ${prevQuestionAnswerIndex.current}: ${transcript}`
-      );
+    const previousIndex = prevQuestionAnswerIndex.current;
+    if (previousIndex !== null) {
+      const combinedTranscript = storedTranscript + transcriptRef.current;
+      previousTranscriptions[previousIndex] = combinedTranscript;
     }
-    // Reset transcript for the new question.
-    resetTranscript();
-    // Update our ref to the current question index.
-    prevQuestionAnswerIndex.current = questionAnswerIndex;
-  }, [questionAnswerIndex, browserSupportsSpeechRecognition, transcript, resetTranscript]);
 
-  return { transcript };
+    const newStoredTranscript = previousTranscriptions[questionAnswerIndex] || "";
+    setStoredTranscript(newStoredTranscript);
+    resetTranscript();
+
+    prevQuestionAnswerIndex.current = questionAnswerIndex;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [questionAnswerIndex, browserSupportsSpeechRecognition, resetTranscript]);
+
+  const combinedTranscript = storedTranscript + transcript;
+
+  return { transcript: combinedTranscript };
 }
